@@ -17,8 +17,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-from matplotlib.collections import PatchCollection
-from matplotlib.patches import Polygon as MplPolygon
 from matplotlib.path import Path as MplPath
 import numpy as np
 import pandas as pd
@@ -39,8 +37,20 @@ FACE_NORMALS = {
     "+H": np.array([ 0., 0., 1.]),
     "-H": np.array([ 0., 0.,-1.]),
 }
+FACE_DISPLAY = {
+    "+R": "+X Ram",
+    "-R": "−X Wake",
+    "+T": "+Y Starboard",
+    "-T": "−Y Port",
+    "+H": "+Z Nadir",
+    "-H": "−Z Zenith",
+}
 DEFAULT_DATA_DIR  = str(Path(__file__).parent / "data")
 DEFAULT_CACHE_DIR = str(Path(__file__).parent / "data" / "cache")
+
+
+def face_label(face: str) -> str:
+    return FACE_DISPLAY.get(face, face)
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +204,7 @@ def _build_export_df(df: pd.DataFrame, face: str) -> pd.DataFrame:
     out = pd.DataFrame({
         "t":           df["t"],
         "I_global":    df[f"I_{face}"],
-        "export_face": face,
+        "export_face": face_label(face),
         "sun_factor":  df["sun_factor"],
     })
     dc, ac = f"I_direct_{face}", f"I_albedo_{face}"
@@ -284,19 +294,6 @@ def run_simulation(config: dict, log) -> dict:
         )
         df["rho_eff"] = df["rho_eff"].fillna(fallback)
 
-    elif mode == "ceres":
-        ceres_path = f"{dd}/ceres_albedo_1day.csv"
-        log(f"Albedo: loading CERES CSV ({ceres_path})...")
-        ceres_df = pd.read_csv(ceres_path)
-        ceres_df["t"] = pd.to_datetime(ceres_df["t"])
-        rho_series = ceres_df[["t", "rho_eff"]].sort_values("t")
-        df = pd.merge_asof(
-            df.sort_values("t"),
-            rho_series,
-            on="t", direction="nearest",
-        )
-        df["rho_eff"] = df["rho_eff"].fillna(fallback)
-
     else:
         raise ValueError(f"Unknown albedo_mode: {mode!r}")
 
@@ -351,7 +348,7 @@ def run_simulation(config: dict, log) -> dict:
     df["sun_factor"]     = ef
 
     # ---- Structural factor -------------------------------------------
-    log("Applying az/el structural mask...")
+    log("Applying structural shading mask...")
     excl_zones, incl_map = parse_az_el_mask(f"{dd}/MSC_Sun_Sensor_Az_El_Mask.csv")
     sf, blocked = build_structural_factor(sun_az, sun_el, excl_zones, incl_map)
     df["structural_factor"]  = sf
@@ -388,6 +385,7 @@ def run_simulation(config: dict, log) -> dict:
         .sort_values(ascending=False)
         .to_frame()
     )
+    esh_summary.index = [face_label(face) for face in esh_summary.index]
     esh_summary.index.name = "Face"
     esh_summary["ESH (hours)"] = esh_summary["ESH (hours)"].round(4)
 
@@ -405,10 +403,9 @@ def run_simulation(config: dict, log) -> dict:
 # Plot helpers
 # ---------------------------------------------------------------------------
 def _fig_irradiance(df, face):
+    label = face_label(face)
     fig, axes = plt.subplots(3, 1, figsize=(11, 8), sharex=True)
     t = df["t"]
-    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-
     # Panel 1 — eclipse factor
     ax = axes[0]
     ax.fill_between(t, df["eclipse_factor"], alpha=0.3, color="gold")
@@ -422,11 +419,11 @@ def _fig_irradiance(df, face):
     dc, ac = f"I_direct_masked_{face}", f"I_albedo_masked_{face}"
     if dc in df.columns:
         ax.fill_between(t, 0, df[dc],           alpha=0.65, color="orange",  label="Direct")
-        ax.fill_between(t, df[dc], df[dc] + df[ac], alpha=0.5,  color="skyblue", label="Albedo (POWER)")
+        ax.fill_between(t, df[dc], df[dc] + df[ac], alpha=0.5,  color="skyblue", label="Albedo")
     else:
         ax.fill_between(t, 0, df[f"I_{face}"], alpha=0.65, color="orange", label="Total")
     ax.set_ylabel("Irradiance\n(W/m²)")
-    ax.set_title(f"Face {face} — masked irradiance", fontsize=10)
+    ax.set_title(f"{label} — masked irradiance", fontsize=10)
     ax.legend(loc="upper right", fontsize=8)
 
     # Panel 3 — cumulative ESH
@@ -446,10 +443,10 @@ def _fig_all_faces(df):
     for k, face in enumerate(FACE_NORMALS):
         col = f"ESH_{face}_cum"
         if col in df.columns:
-            ax.plot(df["t"], df[col], label=face, color=cmap(k / 10))
+            ax.plot(df["t"], df[col], label=face_label(face), color=cmap(k / 10))
     ax.set_xlabel("Time (UTC)")
     ax.set_ylabel("Cumulative ESH (h)")
-    ax.set_title("Cumulative ESH — All Faces (eclipse + structural + exposure masked)")
+    ax.set_title("Cumulative ESH — all MSC faces")
     ax.legend()
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     fig.autofmt_xdate(rotation=25)
@@ -466,36 +463,6 @@ def _fig_rho_eff(df):
     ax.set_ylim(0, 1)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
     fig.autofmt_xdate(rotation=25)
-    fig.tight_layout()
-    return fig
-
-
-def _fig_az_el(df, excl_zones, incl_map):
-    fig, ax = plt.subplots(figsize=(10, 6))
-    cmap = plt.cm.Set1
-    for i, zone in enumerate(excl_zones):
-        poly = MplPolygon(
-            zone, closed=True, fill=True, alpha=0.2,
-            facecolor=cmap(i % 9), edgecolor=cmap(i % 9), lw=1.2,
-        )
-        ax.add_patch(poly)
-        cx, cy = zone[:, 0].mean(), zone[:, 1].mean()
-        ax.text(cx, cy, f"EZ{i+1}", fontsize=7, ha="center", va="center")
-    for excl_i, zones in incl_map.items():
-        for z in zones:
-            poly = MplPolygon(
-                z, closed=True, fill=True, alpha=0.5,
-                facecolor="white", edgecolor="limegreen", linestyle="--", lw=1,
-            )
-            ax.add_patch(poly)
-    ax.plot(df["sun_az_deg"], df["sun_el_deg"], ".", ms=1.2, alpha=0.35,
-            color="navy", label="Sun track (1-min)")
-    ax.set_xlabel("Sun Azimuth (deg)")
-    ax.set_ylabel("Sun Elevation (deg)")
-    ax.set_title("Az/El Diagnostic — Sun Track vs Structural Exclusion Mask")
-    ax.legend(fontsize=8)
-    ax.set_xlim(-181, 181)
-    ax.set_ylim(-91, 91)
     fig.tight_layout()
     return fig
 
@@ -528,6 +495,8 @@ with st.sidebar:
         "Primary face (export & plots)",
         VALID_FACES,
         index=VALID_FACES.index("+H"),
+        format_func=face_label,
+        help="Choose the MSC face used for the main irradiance plot and the face-specific CSV export.",
     )
 
     st.divider()
@@ -535,12 +504,11 @@ with st.sidebar:
 
     albedo_mode = st.radio(
         "Mode",
-        options=["power", "constant", "ceres"],
+        options=["power", "constant"],
         index=0,
         help=(
-            "**power** — NASA POWER daily surface albedo (Tier A, recommended).\n\n"
-            "**constant** — fixed ρ everywhere (Tier C).\n\n"
-            "**ceres** — prepared CERES SYN1deg CSV (Tier B)."
+            "**power** — NASA POWER daily surface albedo along the ISS ground track.\n\n"
+            "**constant** — fixed ρ everywhere, using the value below."
         ),
     )
 
@@ -585,18 +553,8 @@ with st.sidebar:
     run_btn = st.button(
         "Run Simulation",
         type="primary",
-        use_container_width=True,
+        width="stretch",
     )
-
-# ---- Main area -------------------------------------------------------------
-if "result" not in st.session_state:
-    st.info(
-        "Configure the parameters in the sidebar and click **Run Simulation** to start.\n\n"
-        "- With **power** mode selected the app will call the NASA POWER API on the first run "
-        "and cache results locally — subsequent runs for the same date are instant.\n"
-        "- The output CSV is compatible with the downstream `sensor_channel_split.ipynb` notebook."
-    )
-    st.stop()
 
 # ---- Run when button pressed -----------------------------------------------
 if run_btn:
@@ -630,7 +588,7 @@ if run_btn:
             st.session_state["result"] = result
             st.session_state["cfg"]    = cfg
             status_placeholder.success(
-                f"Done — primary face: **{primary_face}**  |  "
+                f"Done — primary face: **{face_label(primary_face)}**  |  "
                 f"ESH: **{result['esh_results'][primary_face]:.3f} h**  |  "
                 f"albedo mode: **{albedo_mode}**"
             )
@@ -644,6 +602,13 @@ if run_btn:
 
 # ---- Display results -------------------------------------------------------
 if "result" not in st.session_state:
+    st.info(
+        "Configure the parameters in the sidebar and click **Run Simulation** to start.\n\n"
+        "- With **power** mode selected the app will call the NASA POWER API on the first run "
+        "and cache results locally — subsequent runs for the same date are instant.\n"
+        "- Use **constant** mode when you want a fast offline comparison with one fixed albedo value.\n"
+        "- The output CSV is compatible with the downstream `sensor_channel_split.ipynb` notebook."
+    )
     st.stop()
 
 result = st.session_state["result"]
@@ -651,81 +616,107 @@ cfg    = st.session_state["cfg"]
 df          = result["df"]
 esh_summary = result["esh_summary"]
 export_df   = result["export_df"]
-excl_zones  = result["excl_zones"]
-incl_map    = result["incl_map"]
 face        = cfg["primary_face"]
+face_name   = face_label(face)
 
 # ---- Top row: summary + info -----------------------------------------------
 col_esh, col_info = st.columns([1, 2])
 
 with col_esh:
     st.subheader("ESH Summary")
-    st.dataframe(esh_summary, use_container_width=True)
+    st.markdown(
+        "Equivalent Sun Hours (ESH) converts the time-varying irradiance on each MSC face "
+        "into the number of hours it would take to receive the same energy under full AM0 sun. "
+        "Higher values mean that face receives more total solar energy over the simulation."
+    )
+    st.dataframe(esh_summary, width="stretch")
 
 with col_info:
     sim_dur_h  = (df["t"].iloc[-1] - df["t"].iloc[0]).total_seconds() / 3600.
     n_umbra    = int((df["eclipse_factor"] == 0.0).sum())
     n_penu     = int((df["eclipse_factor"] == 0.5).sum())
     n_sun      = int((df["eclipse_factor"] == 1.0).sum())
-    n_blocked  = int(df["structural_blocked"].sum())
     open_pct   = df["exposure_open_factor"].mean() * 100
 
     st.subheader("Simulation info")
+    st.markdown(
+        "These values summarize the run that produced the plots and downloads. "
+        "Lighting steps count how many timesteps were in full sunlight, partial shadow, "
+        "or Earth shadow; exposure open shows how much of the timeline was included after "
+        "applying the optional exposure windows."
+    )
     info_df = pd.DataFrame({
         "Parameter": [
             "Start", "End", "Duration (h)", "Timesteps",
-            "Albedo mode", "ρ mean", "ρ min", "ρ max",
+            "Albedo mode", "Albedo mean", "Albedo min", "Albedo max",
             "Umbra steps", "Penumbra steps", "Sunlight steps",
-            "Struct. blocked steps", "Exposure open (%)",
+            "Exposure open (%)",
         ],
         "Value": [
             str(df["t"].iloc[0])[:19],
             str(df["t"].iloc[-1])[:19],
             f"{sim_dur_h:.2f}",
-            len(df),
+            str(len(df)),
             cfg["albedo_mode"],
             f"{df['rho_eff'].mean():.4f}",
             f"{df['rho_eff'].min():.4f}",
             f"{df['rho_eff'].max():.4f}",
-            n_umbra, n_penu, n_sun, n_blocked,
+            str(n_umbra), str(n_penu), str(n_sun),
             f"{open_pct:.1f}",
         ],
     }).set_index("Parameter")
-    st.dataframe(info_df, use_container_width=True)
+    st.dataframe(info_df, width="stretch")
 
 # ---- Tabs: plots -----------------------------------------------------------
 st.divider()
-tab_face, tab_all, tab_rho, tab_azel = st.tabs([
-    f"Irradiance — {face}",
+tab_face, tab_all, tab_rho = st.tabs([
+    f"Irradiance — {face_name}",
     "Cumulative ESH — all faces",
     "ρ_eff(t) — albedo track",
-    "Az/El diagnostic",
 ])
 
 with tab_face:
-    st.pyplot(_fig_irradiance(df, face), use_container_width=True)
+    st.markdown(
+        f"This plot shows how much solar irradiance reaches **{face_name}** over time. "
+        "The top panel is the eclipse factor, the middle panel separates direct solar "
+        "energy from Earth-reflected albedo, and the bottom panel accumulates that energy "
+        "as Equivalent Sun Hours."
+    )
+    st.pyplot(_fig_irradiance(df, face), width="stretch")
 
 with tab_all:
-    st.pyplot(_fig_all_faces(df), use_container_width=True)
+    st.markdown(
+        "This compares cumulative ESH across all MSC faces. The steepest line is the face "
+        "collecting energy fastest at that point in the orbit timeline."
+    )
+    st.pyplot(_fig_all_faces(df), width="stretch")
 
 with tab_rho:
-    st.pyplot(_fig_rho_eff(df), use_container_width=True)
-
-with tab_azel:
-    st.pyplot(_fig_az_el(df, excl_zones, incl_map), use_container_width=True)
+    st.markdown(
+        "This shows the effective surface albedo used by the run. In POWER mode it follows "
+        "the ISS ground track using cached NASA POWER values; in constant mode it stays flat "
+        "at the selected fallback value."
+    )
+    st.pyplot(_fig_rho_eff(df), width="stretch")
 
 # ---- Downloads -------------------------------------------------------------
 st.divider()
+st.subheader("Downloads")
+st.markdown(
+    f"The face-specific CSV contains the irradiance time series for **{face_name}**. "
+    "The full simulation CSV includes all calculated columns for every face and is useful "
+    "for deeper analysis outside the app."
+)
 dl1, dl2 = st.columns(2)
 
 with dl1:
     safe_face = face.replace("+", "p").replace("-", "n")
     st.download_button(
-        label=f"Download irradiance CSV — face {face}",
+        label=f"Download irradiance CSV — {face_name}",
         data=export_df.to_csv(index=False).encode("utf-8"),
         file_name=f"msc_esh_{safe_face}_irradiance.csv",
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
     )
 
 with dl2:
@@ -734,5 +725,5 @@ with dl2:
         data=df.to_csv(index=False).encode("utf-8"),
         file_name="msc_esh_full_simulation.csv",
         mime="text/csv",
-        use_container_width=True,
+        width="stretch",
     )
