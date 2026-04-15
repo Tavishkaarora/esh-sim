@@ -4,7 +4,7 @@ streamlit_app.py — MSC ESH Simulation UI
 Interactive one-page app for the MSC Equivalent Sun Hours prototype.
 
 Run with:
-    cd simulation/MSC_ESH_1_day_test
+    cd simulation/msc-esh-6-month-sim
     streamlit run streamlit_app.py
 """
 
@@ -511,7 +511,7 @@ st.set_page_config(
 
 st.title("MSC ESH Simulation")
 st.caption(
-    "Equivalent Sun Hours for the MISSE Science Carrier — 1-day ISS prototype"
+    "Equivalent Sun Hours for the MISSE Science Carrier — 6-month ISS simulation"
 )
 
 # ---- Sidebar ---------------------------------------------------------------
