@@ -38,12 +38,12 @@ FACE_NORMALS = {
     "-H": np.array([ 0., 0.,-1.]),
 }
 FACE_DISPLAY = {
-    "+R": "+X Ram",
-    "-R": "−X Wake",
-    "+T": "+Y Starboard",
-    "-T": "−Y Port",
-    "+H": "+Z Nadir",
-    "-H": "−Z Zenith",
+    "+R": "+R Zenith",          # Radially outward, away from Earth
+    "-R": "−R Nadir",           # Toward Earth
+    "+T": "+T Ram",             # Along-track (velocity direction)
+    "-T": "−T Wake",            # Anti-velocity
+    "+H": "+H Orbit Normal",    # Perpendicular to orbit plane
+    "-H": "−H Anti-orbit Normal",
 }
 DEFAULT_DATA_DIR  = str(Path(__file__).parent / "data")
 DEFAULT_CACHE_DIR = str(Path(__file__).parent / "data" / "cache")
@@ -409,7 +409,7 @@ def _fig_irradiance(df, face):
     # Panel 1 — eclipse factor
     ax = axes[0]
     ax.fill_between(t, df["eclipse_factor"], alpha=0.3, color="gold")
-    ax.plot(t, df["eclipse_factor"], color="goldenrod", lw=0.8, label="eclipse_factor")
+    ax.plot(t, df["eclipse_factor"], color="goldenrod", lw=0.8, label="Eclipse Factor")
     ax.set_ylabel("Eclipse\nfactor")
     ax.set_ylim(-0.05, 1.15)
     ax.legend(loc="upper right", fontsize=8)
@@ -431,7 +431,9 @@ def _fig_irradiance(df, face):
     ax.plot(t, df[f"ESH_{face}_cum"], color="green", lw=1.4)
     ax.set_ylabel("Cumulative\nESH (h)")
     ax.set_xlabel("Time (UTC)")
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    _loc = mdates.AutoDateLocator()
+    ax.xaxis.set_major_locator(_loc)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(_loc))
     fig.autofmt_xdate(rotation=25)
     fig.tight_layout()
     return fig
@@ -448,7 +450,9 @@ def _fig_all_faces(df):
     ax.set_ylabel("Cumulative ESH (h)")
     ax.set_title("Cumulative ESH — all MSC faces")
     ax.legend()
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    _loc = mdates.AutoDateLocator()
+    ax.xaxis.set_major_locator(_loc)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(_loc))
     fig.autofmt_xdate(rotation=25)
     fig.tight_layout()
     return fig
@@ -459,9 +463,11 @@ def _fig_rho_eff(df):
     ax.plot(df["t"], df["rho_eff"], lw=0.8, color="steelblue")
     ax.set_xlabel("Time (UTC)")
     ax.set_ylabel("ρ_eff (albedo)")
-    ax.set_title("Effective albedo ρ_eff(t) — NASA POWER ALLSKY_SRF_ALB along ISS groundtrack")
+    ax.set_title("Effective albedo ρ_eff(t) along ISS groundtrack")
     ax.set_ylim(0, 1)
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    _loc = mdates.AutoDateLocator()
+    ax.xaxis.set_major_locator(_loc)
+    ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(_loc))
     fig.autofmt_xdate(rotation=25)
     fig.tight_layout()
     return fig
