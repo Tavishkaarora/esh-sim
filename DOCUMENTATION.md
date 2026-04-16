@@ -35,42 +35,42 @@
 
 ## 1. Project Background and Motivation
 
-The **MISSE Science Carrier (MSC)** is an external payload platform attached to the International Space Station. It exposes scientific samples and instruments to the space environment — including raw solar UV radiation, ionising radiation, thermal cycling, and atomic oxygen flux.
+The **MISSE Science Carrier (MSC)** is an external platform attached to the International Space Station (ISS). It exposes material samples and instruments to the space environment — including raw solar UV radiation, ionising radiation, thermal cycling, and atomic oxygen.
 
-A critical parameter for interpreting sample exposure data is the **cumulative solar irradiance** that has fallen on each face of the MSC over the duration of a mission segment. This quantity drives:
+One important value for this project is the **cumulative solar irradiance** received by each face of the MSC during a mission segment. This matters because solar exposure affecrs how materials and sensors behave over time. In particular, it is needed to:
 
-1. **Photon-induced degradation** of optical surfaces, polymers, and detector materials
-2. **Calibration corrections** for sensor channels whose response drifts with UV dose
-3. **Comparison with ground-truth** experiments where known UV doses are applied in vacuum chambers
+1. **Estimate degradation** of materials such as polymers, optical surfaces, and detectors
+2. **Account for changes** in sensor response caused by UV exposure
+3. **Compare on-orbit exposure with ground-truth** experiments where known UV doses are applied 
 
-The challenge is that the ISS does not orbit in a simple, symmetric way relative to the Sun:
-- The orbital plane precesses, causing the **beta angle** (angle between the Sun and the orbital plane) to cycle over months
+Calculating this exposure is not simple because the MSC does not receive sunlight in a constant or uniform way throughout the orbit. Several factors change the amount of irradiance reaching the platform:
+- The ISS orbit changes realtive to the Sun over time, which changes the **beta angle** (angle between the Sun and the orbital plane) 
 - The ISS body and solar arrays periodically **shadow the MSC** (structural blocking)
-- The MSC instrument may have defined **operational windows** (periods when it is actively acquiring data vs. dormant)
+- The MSC may have defined **operational windows** (periods when it is actively acquiring data vs. dormant)
 - **Earth albedo** — sunlight reflected off clouds and surface — contributes a non-trivial second source of irradiance
 
-A simple "multiply orbit fraction by solar constant" approach is insufficient. This simulation was built to model all of these effects rigorously using STK-propagated orbit data as input.
+Because of these effects, total exposure cannot be estimated accurately using a simple average sunlight fraction multiplied by the solar constant. This simulation was developed to account for these time-dependent effects using orbit data generated in STK.
 
 ---
 
 ## 2. What We Are Computing and Why
 
-**Equivalent Sun Hours (ESH)** is the integral of effective solar irradiance normalised to the solar constant:
+**Equivalent Sun Hours (ESH)** is a way to express total solar exposure in units of hours at full solar intensity. It is calculated by integrating the effective solar irradiance over time and normalizing by the solar constant:
 
 ```
 ESH = (1 / AM0) × ∫ I_effective(t) dt          [sun-hours]
 ```
 
-where the integral is in seconds and then divided by 3600 to convert to hours.
+where AM0 is the solar constant and the result is converted from seconds to hours.
 
-One ESH means the sample received the same total energy as if it had sat in full, unobstructed sunlight at 1 AU for one hour. This normalisation makes ESH directly comparable to laboratory UV dose experiments.
+In simple terms, **1 ESH** means the sample received the same total solar energy as it would receive from **one hour of full, unobstructed sunlight at 1 AU**. Using ESH makes it easier to compare on-orbit exposure with controlled laboratory exposure tests. 
 
-We compute ESH **per face** of the MSC package because:
+ESH is calculated **for each face** of the MSC because each face sees a sifferent solar environment. This happens for several reasons:
 - Each face has a different orientation relative to the Sun and Earth
 - Different faces receive dramatically different cumulative doses depending on beta angle history
-- Downstream sensor models are face-specific (each detector panel has its own response curve)
+- The sensor response is face-specific, so each detetctor panel must be evaluated seperately 
 
-The six faces are defined in the **LVLH (Local Vertical Local Horizontal)** frame, described in the next section.
+The six MSC faces are defined in the **LVLH (Local Vertical Local Horizontal)** reference frame, which is described in the next section.
 
 ---
 
@@ -78,24 +78,26 @@ The six faces are defined in the **LVLH (Local Vertical Local Horizontal)** fram
 
 ### J2000 Inertial Frame
 
-STK exports ISS position, velocity, and the Sun position in the **J2000** geocentric inertial frame:
+STK exports ISS position, ISS velocity, and the Sun position in the **J2000** geocentric inertial frame. In this frame:
 - Origin: Earth centre of mass
 - Z-axis: North celestial pole (Earth rotation axis at J2000.0 epoch)
 - X-axis: Vernal equinox direction at J2000.0
 
-This is the natural frame for orbit propagation. All STK state vector CSVs are in J2000.
+This is the reference frame used by STK for the state vector data exported to CSV.
 
 ### LVLH Frame (Local Vertical Local Horizontal)
 
-The simulation geometry is computed in the **LVLH frame**, which is body-fixed to the spacecraft and therefore rotates as the ISS orbits:
+The simulation geometry is computed in the **LVLH frame**, which is attached to the spacecraft and therefore rotates as the ISS orbits.
+
+The three LVLH unit vectors are defined as follows:
 
 | Axis | Symbol | Definition |
 |---|---|---|
-| Radial | R̂ | Unit vector from Earth centre toward ISS: `r_iss / |r_iss|` |
-| Along-track | T̂ | Perpendicular to R̂ in the orbital plane, in velocity direction: `v_iss - (v_iss · R̂)R̂`, normalised |
-| Orbit normal | Ĥ | Completes right-handed system: `R̂ × T̂` |
+| Radial | R̂ | Unit vector from the Earth center to the ISS |
+| Along-track | T̂ | Unit vector in the direction of motion within the orbital plane |
+| Orbit normal | Ĥ | Unit vector normal to the orbital plane |
 
-Construction from STK state vector:
+These vectors are contructed from the ISS position and velocity from STK:
 ```python
 r = np.array([x, y, z])           # ISS position in J2000
 v = np.array([vx, vy, vz])        # ISS velocity in J2000
@@ -106,10 +108,11 @@ H_hat = np.cross(r, v)
 H_hat = H_hat / np.linalg.norm(H_hat)
 T_hat = np.cross(H_hat, R_hat)    # then along-track
 ```
+This creates a right-handed LVLH coordinate system that is used to describe face orientations and Sun direction throguhout the simulation.
 
 ### Sun Direction in LVLH
 
-The Sun position vector from STK (`sun_pos` in J2000) is converted to a unit direction vector relative to ISS:
+The Sun position vector from STK (`sun_pos` in J2000) is first converted to a unit direction vector from the ISS to the Sun:
 
 ```python
 sun_vec = sun_pos - iss_pos        # Sun direction from ISS
@@ -121,18 +124,24 @@ s_T = np.dot(sun_unit, T_hat)      # along-track component
 s_H = np.dot(sun_unit, H_hat)      # orbit-normal component
 ```
 
-This gives us the Sun direction as seen from the MSC in body-fixed coordinates.
+These three components describe the Sun direction in LVLH coordinates, which allows the simulation to determine how much irradiance reaches each MSC face.
 
 ### Sensor Frame / Az/El Convention
 
-The structural blocking mask is expressed in an **azimuth/elevation** system tied to the sensor frame:
+The structural blocking mask is expressed in an **azimuth/elevation** coordinate system tied to the sensor frame:
 
-- **Elevation (El):** `arcsin(s_H)` — angle above the orbital plane. Zero = orbital plane; +90° = orbit normal direction (+H face).
-- **Azimuth (Az):** `atan2(s_T, s_R)` — angle in the orbital plane, measured from radially outward (+R). Zero = zenith; +90° = along-track (+T direction).
-
+- **Elevation (El)** is computed as `arcsin(s_H)` and represents the angle above the orbital plane. 
+- **Azimuth (Az)** is computed as `atan2(s_T, s_R)` and represents the angle in the orbital plane, measured from the +R direction toward the +T direction.
+  
+With this convention: 
+- `El = 0°` lies in the orbital plane
+- `El = +90°` points in the +H direction
+- `Az = 0°` points along +R
+- `Az = 90°` points along +T
+  
 This convention was chosen to match the Az/El definitions used in the STK sensor field-of-view report that generated `MSC_Sun_Sensor_Az_El_Mask.csv`.
 
-**Important:** The STK Az/El mask report uses a specific sensor frame that must be verified against the physical MSC sensor boresight and mount orientation. Currently the code assumes the sensor boresight aligns with +H (orbit normal), which is the most common ISS external payload orientation.
+**Important:** The current implementation assumes that the sensor boresight is aligned with the +H direction, which is the most common ISS external payload orientation. This assumption should be verified against the actual MSC mounting orientation and the sensor frame used in STK.
 
 ---
 
