@@ -155,21 +155,21 @@ The simulation uses:
 AM0 = 1361.0 W/m²
 ```
 
-This is the **total solar irradiance (TSI)** at 1 AU, sometimes called the "AM0" (air mass zero, i.e., outside the atmosphere) value. The current accepted best value is approximately 1361 ± 0.5 W/m² (Kopp & Lean 2011, revised SORCE/TIM measurements).
+This value represents the **total solar irradiance (TSI)** at 1 AU outside Earth's atmosphere, often called the "AM0" (air mass zero, i.e., outside the atmosphere) value. The current accepted best value is approximately 1361 ± 0.5 W/m² (Kopp & Lean 2011, revised SORCE/TIM measurements).
 
 The TSI varies by ~0.1% over the 11-year solar cycle and by ~0.07% seasonally (Earth's eccentricity). For a 6-month simulation, seasonal variation in Earth–Sun distance would produce at most a ~3% difference in direct irradiance between perihelion (early January, ~1410 W/m²) and aphelion (early July, ~1320 W/m²). The current simulation uses a **fixed AM0 = 1361 W/m²** (the annual mean). For higher fidelity, this could be replaced with a time-varying TSI computed from Earth's ecliptic longitude.
 
 ### 4.2 Direct Irradiance
 
-For a flat surface with unit outward normal n̂, the direct solar irradiance (W/m²) at timestep t is:
+For a flat surface with outward unit normal n̂, the direct solar irradiance (W/m²) at each timestep t is calculated as:
 
 ```
 I_direct = AM0 × max(0, sun_unit · n̂)
 ```
 
-The `max(0, ...)` clamp ensures that faces pointing away from the Sun (negative dot product) receive zero direct irradiance — a face cannot receive sunlight through itself.
+The dot product gives the cosine of the angle between the Sun direction and the face normal. If that value is negative, the face is pointing away from the Sun, so the direct irradiance is set to zero. 
 
-For each of the 6 LVLH-aligned faces:
+For each of the 6 LVLH-aligned faces, this becomes:
 ```python
 # For face "+H" (normal = [0, 0, 1]):
 cos_angle = s_H          # dot product with [0, 0, 1]
@@ -178,12 +178,13 @@ I_direct_H = AM0 * max(0, cos_angle)
 # For face "+R" (normal = [1, 0, 0]):
 cos_angle = s_R
 I_direct_R = AM0 * max(0, cos_angle)
-# etc.
+
+# other faces are handled the same way
 ```
 
 ### 4.3 Earth Albedo Irradiance
 
-The ISS receives reflected sunlight from Earth's surface and clouds. This **albedo irradiance** depends on:
+In addition to direct sunlight, the ISS also receives sunlight reflected from the Earth and clouds. This reflected compononet is modeled as **albedo irradiance**. In this simulation, albedo irradiance depends on four terms:
 
 1. **Earth surface reflectivity ρ** (albedo, dimensionless 0–1)
 2. **Earth view factor F_earth** — what fraction of the sky hemisphere "seen" by the face is occupied by Earth
@@ -192,18 +193,19 @@ The ISS receives reflected sunlight from Earth's surface and clouds. This **albe
 
 **Earth view factor:**
 
-The Earth subtends a solid angle from the ISS. For a flat surface above Earth at altitude h (where r = R_earth + h is the orbital radius):
+From ISS altitude, the Earth fills a large part of the downward-looking hemisphere. The Earth view factor is approximated as:
 
 ```
 α = arcsin(R_earth / r)                # half-angle subtended by Earth disk
 F_earth = sin²(α)                       # view factor of Earth hemisphere
 ```
+where r = R_earth + h is the orbital radius.
 
-At ISS altitude (~410 km), `r ≈ 6788 km`, `α ≈ arcsin(6378/6788) ≈ 69.9°`, so `F_earth ≈ sin²(69.9°) ≈ 0.881`. Earth fills about 88% of the lower hemisphere as seen from the ISS.
+At typical ISS altitude (~410 km), `r ≈ 6788 km`, `α ≈ arcsin(6378/6788) ≈ 69.9°`, so `F_earth ≈ sin²(69.9°) ≈ 0.881`. Earth fills about 88% of the lower hemisphere as seen from the ISS.
 
 **Day factor:**
 
-Earth reflects sunlight only from its sunlit side. The day factor estimates the fraction of the visible Earth disk that is sunlit, approximated by:
+Only the sunlit portion of the Earth contributes reflected sunlight. The model estimates this using a simple day factor:
 
 ```python
 # Sun-Earth-ISS angle (ISS side)
@@ -215,7 +217,7 @@ where `earth_unit = -R_hat` (direction from ISS to Earth centre) and `sun_unit` 
 
 **Albedo irradiance per face:**
 
-For each face with LVLH normal n̂:
+For each face with LVLH normal n̂, the albedo irradiance is calculated as:
 ```
 cos_earth = max(0, dot(n̂, -R_hat))    # angle to Earth centre; -R_hat = nadir
 
@@ -224,7 +226,7 @@ I_albedo = ρ_eff × AM0 × F_earth × day_factor × cos_earth
 
 Note that `cos_earth` for the **-R (nadir) face** is maximised (= 1.0) since it points directly at Earth. The **+R (zenith) face** receives zero albedo since its normal points away from Earth.
 
-The albedo irradiance component is **not blocked by structural masking** because it arrives from the diffuse Earth hemisphere (extended source), not as a collimated beam. Structural exclusion zones block collimated direct sunlight only.
+In the current model, albedo is **not affected by the structural blocking mask**. This is because albedo comes from the broad Earth disk rather than from a single direct Sun direction. The structural mask is only applied to direct solar irradiance.
 
 ---
 
@@ -232,17 +234,19 @@ The albedo irradiance component is **not blocked by structural masking** because
 
 ### 5.1 NASA POWER (Recommended)
 
-**NASA POWER** (Prediction of Worldwide Energy Resources) is a NASA data product providing meteorological and solar resource parameters at any location on Earth's surface on a 0.5° × 0.5° grid.
+The main albedo data source used in this simulation is **NASA POWER** (Prediction of Worldwide Energy Resources). NASA POWER provides environmental and solar resource data on a global 0.5° × 0.5° grid and can be queried by latitude, longitude, and date. 
 
-**Why POWER?**
-- Free, REST API access with no registration
-- Daily temporal resolution with global spatial coverage
-- `ALLSKY_SRF_ALB` parameter directly provides the all-sky surface albedo (cloud-weighted average reflectivity) as observed from the surface
-- Data assimilated from MERRA-2 reanalysis; physically consistent
+In this project, the `ALLSKY_SRF_ALB` parameter is used as an estimate of surface albedo. This provides a practical way to include geographic and day-to-day variation in reflected sunlight. 
+
+**NASA POWER** was selected because it:
+- is freely available through an API (no registration needed)
+- has global spatial coverage
+- provides daily data
+- is easy to integrate into the simulation pipeline 
 
 **API mechanics:**
 1. The ISS sub-satellite lat/lon is taken from `ISS_Model_LLA_Position.csv`
-2. Coordinates are snapped to the nearest 0.5° POWER grid centre to reduce API calls for nearby positions
+2. Coordinates are rounded to the nearest 0.5° POWER grid centre to reduce API calls for nearby positions
 3. One API call is made per unique (lat, lon, date) triple, with results cached as JSON
 4. The default query interval is 1440 minutes (one call per calendar day), meaning the ISS position is sampled once per day for the albedo query
 
