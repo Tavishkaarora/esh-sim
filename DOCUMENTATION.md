@@ -232,7 +232,7 @@ In the current model, albedo is **not affected by the structural blocking mask**
 
 ## 5. Albedo Data Sources
 
-### 5.1 NASA POWER (Recommended)
+### 5.1 NASA POWER 
 
 The main albedo data source used in this simulation is **NASA POWER** (Prediction of Worldwide Energy Resources). NASA POWER provides environmental and solar resource data on a global 0.5° × 0.5° grid and can be queried by latitude, longitude, and date. 
 
@@ -246,80 +246,81 @@ In this project, the `ALLSKY_SRF_ALB` parameter is used as an estimate of surfac
 
 **API mechanics:**
 1. The ISS sub-satellite lat/lon is taken from `ISS_Model_LLA_Position.csv`
-2. Coordinates are rounded to the nearest 0.5° POWER grid centre to reduce API calls for nearby positions
+2. Coordinates are rounded to the nearest 0.5° POWER grid point to reduce API calls for nearby positions
 3. One API call is made per unique (lat, lon, date) triple, with results cached as JSON
 4. The default query interval is 1440 minutes (one call per calendar day), meaning the ISS position is sampled once per day for the albedo query
 
 **Tradeoffs:**
-- POWER surface albedo is not identical to TOA (top-of-atmosphere) reflected albedo — it does not include cloud reflectivity added in the column. For space-based irradiance, TOA reflected flux is more physically correct.
-- However, POWER is readily available and the difference is partially accounted for by the `ALLSKY` parameter which incorporates cloud cover information through MERRA-2.
+- POWER does not provide the exact TOA (top-of-atmosphere) reflected flux seen by the ISS — it does not include cloud reflectivity added in the column. It is an approximation rather than a fully space-based albedo model (TOA reflected flux is more physically correct). However, POWER is readily available and the difference is partially accounted for by the `ALLSKY` parameter which incorporates cloud cover information through MERRA-2.
 
 **Cache structure:**
+Cached files are stored in the form:
 ```
 data/cache/power_<lat>_<lon>_<date>.json
 ```
-e.g., `power_27.00_-86.50_20200811.json` → `{"value": 0.08, "parameter": "ALLSKY_SRF_ALB", ...}`
+For example:
+`power_27.00_-86.50_20200811.json` → `{"value": 0.08, "parameter": "ALLSKY_SRF_ALB", ...}`
 
-### 5.2 Constant Albedo (Fast Fallback)
+### 5.2 Constant Albedo 
 
-A single fixed value ρ = 0.27 is used at all times and locations.
+As a fallback option, the simulation can use a single fixed albedo value:
+`ρ = 0.27` 
+This value is used at all times and locations.
 
-**Why 0.27?**
-- Earth's global mean Bond albedo is approximately 0.30
-- ISS orbits at ~51.6° inclination, overflying predominantly ocean and mid-latitude land
-- Ocean albedo is ~0.06–0.10; mid-latitude land ~0.15–0.25; cloud tops ~0.60–0.80
-- Weighted by orbital coverage and typical cloud fraction, 0.27 is a reasonable central estimate
-- It is slightly below the global mean (0.30) to account for the ISS orbital ground track sampling more ocean than the global average
+**A constant albedo is useful when:**
+- Quick validation runs are needed where albedo accuracy is not critical
+- POWER API is unavailable (no internet access)
+- Many cases need to be run quickly (batch runs)
 
-**When to use constant albedo:**
-- Quick validation runs where albedo accuracy is not critical
-- When POWER API is unavailable (no internet access)
-- When generating many scenarios rapidly (batch runs)
+The value `0.27` was chosen as a reasonable average approximation for Earth reflectivity along the ISS orbit. It is slightly lower than the global mean Earth albedo and is intended to represent a simple middle-ground estimate when location-based albedo data is not being used.
+
+This option is less realistic than NASA POWER, but it is useful for testing, debugging, and rapid simulation runs.
 
 ---
 
 ## 6. STK as the Orbital Mechanics Engine
 
-Systems Tool Kit (STK) by Ansys was chosen as the orbit propagation engine for several reasons:
+Systems Tool Kit (STK) by Ansys was chosen as the orbital mechanics engine for this simulation. It provdes time-dependent geometry needed to model solar exposure on the MSC. 
 
-1. **High-fidelity propagation:** STK's HPOP (High Precision Orbit Propagator) accounts for J2–J6 gravity harmonics, atmospheric drag (NRLMSISE-00), solar radiation pressure, and third-body effects (Moon, Sun). This is essential for accurate ISS state prediction over month-long spans.
+STK was selected for several reasons:
 
-2. **Eclipse computation:** STK's lighting analysis uses a conical Earth shadow model (not a cylindrical approximation), correctly computing penumbra entry/exit geometry. This is computationally expensive to implement from scratch.
+1. **High-fidelity orbit propagation:** STK's HPOP (High Precision Orbit Propagator) accounts for J2–J6 gravity harmonics, atmospheric drag (NRLMSISE-00), solar radiation pressure, and third-body effects (Moon, Sun). This is essential for accurate ISS state prediction over month-long spans.
 
-3. **Sensor field-of-view masks:** The Az/El mask report is generated directly from the STK sensor object geometry, which incorporates the full CAD/analytical model of ISS structural blocking. This is far more accurate than any simplified hand-coded model.
+2. **Lighting analysis:** STK provides eclipse and lighting information, including transitions into and out of Earth shadow. This allows the simulation to determine when direct solar irradiance should be reduced or removed. 
 
-4. **Authority of truth:** STK is NASA's standard tool for ISS mission planning. Using STK state vectors as inputs ensures the simulation is consistent with official ISS trajectory products.
+3. **Structural blocking geometry:** The Az/El mask report is generated directly from the STK sensor object geometry, which incorporates the full CAD/analytical model of ISS structural blocking. This is far more accurate than any simplified hand-coded model.
 
-**What STK does NOT provide directly:**
-- Albedo (handled by NASA POWER)
+4. **Consistent geometry source:** STK is NASA's standard tool for ISS mission planning. Using STK state vectors as inputs ensures the simulation is consistent with official ISS trajectory products.
+
+STK provides the orbital and geometric inputs, but it does not directly perform the full ESH calculation used in this project. The following parts are handled separately in Python:
+- Albedo modeling (handled by NASA POWER)
 - Per-face irradiance integration (handled by Python simulation)
 - ESH accumulation (handled by Python simulation)
 - Operational exposure masking (handled by Python simulation)
 
-The design philosophy is: **let STK handle orbital mechanics; handle photonics and mission logic in Python.**
+This approach separates the problem into two parts: **STK is used for orbital geometry, and Python is used for irradiance modeling and mission-specific logic.**
 
 ---
 
 ## 7. The Three Masking Layers
 
-The simulation applies three independent masks to the irradiance at each timestep. The masks are independent — they are multiplied together, not combined via any other logic. This makes it easy to diagnose which mask is responsible for any reduction in ESH.
+The simulation applies three separate masks to the irradiance at each timestep. Each mask represents a different physical reason why the received irradiance may be reduced. The masks are applied independently and multiplied together in the final irradiance calculation. This makes it easier to see which effect is responsible for a reduction in ESH.
 
 ### 7.1 Eclipse Mask
 
-**Physical basis:** When the ISS passes through Earth's shadow, direct solar irradiance drops to zero (umbra) or partially attenuates (penumbra). This occurs every orbit during certain beta angle regimes.
+The eclipse mask accounts for times when the ISS passes into Earth’s shadow. During these periods, direct solar irradiance is reduced or removed depending on the lighting condition.
 
-**Implementation:**
-- Parse the three tables from `ISS_Model_Lighting_Times.csv` into sunlight, penumbra, and umbra interval lists
-- For each timestep, determine which interval contains that timestamp
-- Assign `eclipse_factor`:
+The lighting intervals are taken from `ISS_Model_Lighting_Times.csv` and divided into: 
+- Sunlight
+- Pneumbra
+- Umbra
+
+For each timestep, the simulation assigns an `eclipse_factor`:
   - Sunlight → 1.0
-  - Penumbra → 0.5 (see note below)
+  - Penumbra → 0.5 
   - Umbra → 0.0
 
-**Penumbra factor (0.5) — rationale and limitations:**
-Penumbra is the annular region where Earth partially occults the solar disk as seen from ISS. The physically correct irradiance during penumbra would be computed from the fraction of the solar disk that remains unoccluded, which varies continuously from 1.0 (penumbra entry) to 0.0 (umbra entry). This requires knowledge of the Sun's angular diameter (~0.5°) and the precise geometry of Earth's shadow.
-
-For this simulation, a factor of 0.5 is used as a simple midpoint approximation. This is acceptable because:
+The penumbra value of `0.5` is used as a simple approximation for partial solar blockage. A more detailed model could calculate the visible fraction of the solar disk during penumbra, but that level of detail is not necessary here because penumbra intervals are short and have very little effect on total ESH. This is acceptable because:
 - Penumbra events at ISS altitude last approximately 12 seconds
 - In a 1-minute cadence dataset, each penumbra event affects at most 1 timestep
 - The total ESH contribution from all penumbra timesteps combined is less than 0.01% of total ESH
@@ -333,10 +334,11 @@ The eclipse fraction varies significantly with beta angle: at high beta angles (
 
 ### 7.2 Structural Blocking Mask
 
-**Physical basis:** The ISS structure — primarily the Integrated Truss Structure (ITS), solar array wings (SAWs), and the Pressurised Mating Adapters — casts shadows on the MSC sensor aperture for certain Sun directions. These obstructions are modelled in STK as a sensor Az/El mask (field-of-view constraint).
+The **structural blocking mask** accounts for direct sunlight blocked by ISS structure. Depending on the Sun direction, parts of the station such as the Integrated Truss Structure (ITS), solar array wings (SAWs), and the Pressurised Mating Adapters can cast shadows on the MSC sensor location.
 
-**The Az/El mask format:**
-The file `MSC_Sun_Sensor_Az_El_Mask.csv` contains polygon vertex sequences defining:
+These obstructions are modelled by the STK-generated file `MSC_Sun_Sensor_Az_El_Mask.csv`. The file contains polygons in azimuth/elevation space that define where the Sun is blocked.
+
+The mask includes:
 - **6 Exclusion Zones (EZ1–EZ6):** Az/El regions where ISS structure blocks the Sun
 - **57 Inclusion Zones (IZ):** Sub-regions within exclusion zones that are *not* actually blocked (windows in the structure, gaps between arrays)
 
@@ -344,8 +346,9 @@ A Sun position is **structurally blocked** if and only if:
 - It falls **inside** at least one exclusion zone polygon, **AND**
 - It falls **outside** all inclusion zone polygons that are associated with that exclusion zone
 
-**Polygon containment implementation:**
-The code uses `matplotlib.path.Path.contains_points()`, which implements a standard ray-casting algorithm to determine point-in-polygon membership. This is applied to the (Az, El) pair at each timestep.
+In the code, this is checked using polygon containment tests in azimuth/elevation space. The result is a binary structural factor:
+- blocked → `0.0`
+- unblocked → `1.0`
 
 ```python
 from matplotlib.path import Path
@@ -371,24 +374,24 @@ The one-day prototype test (`esh_prototype.ipynb`) was run on 4–5 Mar 2026 whe
 
 ### 7.3 Operational Exposure Mask
 
-**Physical basis:** The MSC instrument may not be acquiring data continuously. Operational exposure windows define the periods when the instrument shutter (or equivalent) is open and actively receiving radiation. Outside these windows, the sample is protected.
+The **operational exposure mask** accounts for times when the instrument is not actively exposed. Even if sunlight is available, the MSC may only collect exposure during specific operating windows.
 
-**Implementation:**
-- User provides a list of (start, end) timestamp strings
-- These are parsed and merged (overlapping windows are combined)
-- A per-timestep binary factor is created: 1.0 inside any window, 0.0 outside all windows
-- If no windows are specified, the factor is 1.0 for all timesteps (always-open)
+The user provides a set of exposure start and end times. These windows are parsed and merged if needed, and the simulation assigns an `exposure_factor` at each timestep:
+- inside an exposure window → `1.0`
+- outside an exposure window → `0.0`
+
+If no exposure windows are provided, the simulation assumes the instrument is exposed for the full time period.
 
 **Why this matters:**
 For multi-month missions with defined operational schedules (e.g., instrument activated for 2 hours per day during certain orbital passes), the ESH accumulated during dormant periods is zero regardless of solar geometry. This mask allows the simulation to accurately represent the actual instrument exposure history.
 
-**Note on albedo masking:** The exposure mask is applied to albedo irradiance as well as direct irradiance. The physical rationale is that if the instrument aperture is closed, it receives neither direct nor reflected irradiance.
+**Note on albedo masking:** The exposure mask is applied to both direct irradiance and albedo irradiance. If the instrument is closed or inactive, it is assumed to receive neither direct nor reflected light.
 
 ---
 
 ## 8. ESH Integration
 
-After applying all three masks, the final irradiance per face per timestep is:
+After the eclipse, structural, and exposure masks are applied, the final irradiance for each face at each timestep is:
 
 ```
 I_direct_masked  = I_direct  × eclipse_factor × structural_factor × exposure_factor
@@ -396,29 +399,29 @@ I_albedo_masked  = I_albedo  × eclipse_factor × 1.0               × exposure_
 I_total_masked   = I_direct_masked + I_albedo_masked
 ```
 
-**Timestep integration:**
-The timestep duration `dt` (seconds) is computed from consecutive timestamp differences:
+The **timestep duration** `dt` (seconds) is computed from consecutive timestamp differences:
 ```python
 dt = (timestamps[t+1] - timestamps[t]).total_seconds()
 ```
 
 For a uniform STK export cadence (e.g., 60 seconds), all dt values are equal. For irregular cadences or edge cases, using actual timestamp differences is more robust than assuming a fixed dt.
 
-**ESH accumulation:**
+The **ESH** added during each timestep is then calculated as:
 ```python
 ESH_increment = I_total_masked × dt / AM0 / 3600    # sun-hours per timestep
 ESH_cumulative = cumsum(ESH_increment)
 ```
+where dividing by AM0 normalizes the irradiance and dividing by 3600 converts the result from seconds to hours.
 
-**Total ESH per face:**
+The **total ESH** for a face over the full simulation period is:
 ```python
 ESH_total = sum(ESH_increment)    # integrated over full simulation period
 ```
 
-**Per-face statistics reported:**
+In addition to total ESH, the simulation reports several summary values for each face:
 - Total ESH (sun-hours)
 - Peak irradiance (W/m²)
-- Mean irradiance when unblocked (W/m²)
+- Mean irradiance during unblocked periods (W/m²)
 - Fraction of time in sunlight (vs. eclipse)
 - Fraction of time structurally blocked (when in sunlight)
 
@@ -426,14 +429,15 @@ ESH_total = sum(ESH_increment)    # integrated over full simulation period
 
 ## 9. Pipeline Implementation Decisions
 
-### Why Python + pandas rather than MATLAB or Fortran?
+### Python-Based Simulation Pipeline
 
+The simulation is implemented in Python because of its:
 - **Portability:** Python runs on all platforms without license requirements
 - **NASA POWER API access:** Python's `requests` library makes REST API calls straightforward
 - **Streamlit:** Rapid interactive UI deployment with minimal front-end code
 - **Pandas datetime handling:** Robust parsing of STK timestamp strings and time series alignment
 
-### Why Streamlit for the UI?
+### Streamlit User Interface
 
 Streamlit converts a Python script into an interactive web app with minimal boilerplate. Key advantages for this use case:
 - Users can change simulation parameters (face, albedo mode, exposure windows) without editing code
@@ -441,26 +445,28 @@ Streamlit converts a Python script into an interactive web app with minimal boil
 - CSV download buttons without file I/O code
 - Runs locally — no server, no cloud dependency, no data leaves the machine
 
-### Why cache NASA POWER responses to disk?
+### NASA POWER Cache
 
 The POWER API has rate limits and network latency. A 6-month simulation over the ISS orbit samples ~180 unique (lat, lon) positions per day at 1440-minute query intervals = ~180 API calls per simulation run. Disk caching:
 - Makes subsequent runs essentially instant (~0 API calls if all dates already cached)
 - Prevents hitting API rate limits on repeated development runs
 - Allows offline runs once the cache is populated
 
-### Why use matplotlib.path for Az/El polygon containment?
+### Azimuth/Elevation Polygon Checks
 
-The Az/El mask has 57 inclusion zone polygons. A vectorised implementation using `Path.contains_points()` tests all N timesteps against all polygons in one NumPy operation, which is orders of magnitude faster than a Python loop over timesteps.
+The structural blocking mask is evaluated using polygon containment checks in azimuth/elevation space. This is implemented with`Path.contains_points()` which tests all N timesteps against all polygons in one NumPy operation, orders of magnitude faster than a Python loop over timesteps.
 
-### Why not use STK's built-in irradiance analysis?
+### Custom Python Irrandiance Calculation 
 
-STK's solar panel analysis tools can compute irradiance on a surface, but they:
-- Do not integrate ESH over arbitrary exposure windows
-- Do not support the NASA POWER albedo data pipeline
-- Do not produce the specific output CSV schema required by downstream analysis
-- Are not easily scriptable for batch runs across multiple scenarios
+Although STK can provide solar analysis tools, the full ESH workflow in this project is handled in Python. This is because the project requires several custom steps that are outside the standard STK workflow, including:
 
-The Python simulation gives complete control over every aspect of the computation.
+- Albedo input from NASA POWER
+- Per-face irradiance calculations
+- ESH integration over time
+- Operational exposure masking
+- Export of project-specific outputs
+
+Using Python for these steps gives the simulation more flexibility and makes it easier to adapt the workflow as the project develops.
 
 ---
 
