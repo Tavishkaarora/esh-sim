@@ -2,8 +2,8 @@
 power_albedo.py — NASA POWER daily surface albedo fetcher with local JSON cache.
 
 Tier A albedo for MSC ESH simulation.  Queries the POWER Daily API for
-ALLSKY_SRF_ALB (or CLRSKY_SRF_ALB) at the ISS sub-satellite lat/lon and
-returns a per-timestep rho_eff Series that can be merged into the main df.
+ALLSKY_SRF_ALB at the ISS sub-satellite lat/lon and returns a per-timestep
+rho_eff Series that can be merged into the main df.
 
 Usage
 -----
@@ -15,7 +15,6 @@ API reference
 -------------
     https://power.larc.nasa.gov/api/temporal/daily/point
     parameters: ALLSKY_SRF_ALB  (all-sky surface albedo, dimensionless)
-                CLRSKY_SRF_ALB  (clear-sky surface albedo, dimensionless)
 """
 
 import json
@@ -142,7 +141,7 @@ def build_power_rho_series(
     ----------
     lla_df    : DataFrame with columns 't' (datetime64), 'Lat (deg)', 'Lon (deg)'.
     cache_dir : Local directory for JSON cache files.
-    parameter : POWER parameter — 'ALLSKY_SRF_ALB' or 'CLRSKY_SRF_ALB'.
+    parameter : POWER parameter name.
     fallback  : Value used when POWER returns NaN or a fill value.
     query_interval_minutes : POWER query cadence per UTC day.
         Default 1440 => one POWER call/day.

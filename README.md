@@ -185,7 +185,7 @@ https://power.larc.nasa.gov/api/temporal/daily/point
 | Primary face | `+H` | Which face to feature in the main irradiance plot |
 | Albedo mode | `power` | `power` (NASA POWER API) or `constant` |
 | Constant albedo | 0.27 | Used when mode is `constant`, or as POWER fallback |
-| POWER parameter | `ALLSKY_SRF_ALB` | `ALLSKY_SRF_ALB` (cloudy+clear) or `CLRSKY_SRF_ALB` (clear only) |
+| POWER parameter | `ALLSKY_SRF_ALB` | All-sky surface albedo (clouds included) |
 | POWER cache dir | `data/cache` | Where to read/write cached POWER JSON files |
 | Exposure windows | *(blank)* | Operational open intervals (one per line, start → stop) |
 
@@ -437,7 +437,7 @@ EXPOSURE_WINDOWS = [
 # ── Albedo model ─────────────────────────────────────────────────────────────
 ALBEDO_MODE = "power"     # "power" | "constant"
 ALBEDO_CONSTANT = 0.27    # Used when mode is "constant" or as POWER fallback
-POWER_PARAM = "ALLSKY_SRF_ALB"   # or "CLRSKY_SRF_ALB"
+POWER_PARAM = "ALLSKY_SRF_ALB"
 ```
 
 Then run all cells: **Kernel → Restart & Run All**.
@@ -553,7 +553,7 @@ Then point the Streamlit sidebar **Data directory** field to the new subfolder, 
 
 ### 7.8 Clearing the Albedo Cache
 
-NASA POWER albedo values are cached per (lat, lon, date). When you change the simulation period, new dates will be fetched automatically. However, to force a complete re-fetch (e.g., to switch from ALLSKY to CLRSKY), delete the cache:
+NASA POWER albedo values are cached per (lat, lon, date). When you change the simulation period, new dates will be fetched automatically. To force a complete re-fetch, delete the cache:
 ```bash
 rm simulation/msc-esh-6-month-sim/data/cache/power_*.json
 ```
@@ -575,7 +575,7 @@ rm simulation/msc-esh-6-month-sim/data/cache/power_*.json
 |---|---|---|
 | `ALBEDO_MODE` | `"power"` | `"power"` or `"constant"` |
 | `ALBEDO_CONSTANT` | `0.27` | Fixed albedo; used in constant mode or as POWER fallback |
-| `POWER_PARAM` | `"ALLSKY_SRF_ALB"` | `ALLSKY_SRF_ALB` = cloud-inclusive; `CLRSKY_SRF_ALB` = cloud-free |
+| `POWER_PARAM` | `"ALLSKY_SRF_ALB"` | All-sky surface albedo (cloud-inclusive) |
 | `query_interval_minutes` | `1440` | Minimum time between POWER API queries (1440 = once per day) |
 
 ### Exposure windows
@@ -609,8 +609,7 @@ where `F_earth = sin²(arcsin(R_earth / r_spacecraft))` is the Earth disc view f
 
 ### Option A: NASA POWER API (recommended)
 
-- **Parameter:** `ALLSKY_SRF_ALB` (all-sky, includes cloud reflection) — recommended for most cases
-- **Parameter:** `CLRSKY_SRF_ALB` (clear-sky only) — use for conservative cloud-free estimate
+- **Parameter:** `ALLSKY_SRF_ALB` (all-sky, includes cloud reflection)
 - **Resolution:** 0.5° × 0.5° spatial, daily temporal
 - **Caching:** Results cached to `data/cache/` as JSON; subsequent runs are instant
 - **Fallback:** If POWER returns a fill value for a given cell, `ALBEDO_CONSTANT` (0.27) is used

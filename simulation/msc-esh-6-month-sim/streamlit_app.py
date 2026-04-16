@@ -521,14 +521,6 @@ with st.sidebar:
     power_param = "ALLSKY_SRF_ALB"
     power_cache = DEFAULT_CACHE_DIR
     if albedo_mode == "power":
-        power_param = st.selectbox(
-            "POWER parameter",
-            ["ALLSKY_SRF_ALB", "CLRSKY_SRF_ALB"],
-            help=(
-                "**ALLSKY_SRF_ALB** — all-sky surface albedo (clouds included).\n\n"
-                "**CLRSKY_SRF_ALB** — clear-sky surface albedo only."
-            ),
-        )
         power_cache = st.text_input(
             "POWER cache directory",
             value=DEFAULT_CACHE_DIR,
@@ -545,7 +537,7 @@ with st.sidebar:
         "Exposure windows",
         value="",
         height=90,
-        placeholder="04 Mar 2026 10:54:00.000 | 04 Mar 2026 11:54:00.000",
+        placeholder="01 Aug 2020 08:00:00.000 | 01 Aug 2020 10:00:00.000",
         label_visibility="collapsed",
     )
 
