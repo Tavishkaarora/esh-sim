@@ -474,32 +474,32 @@ Using Python for these steps gives the simulation more flexibility and makes it 
 
 ### Prototype notebook (`esh_prototype.ipynb`)
 
-The prototype serves as a single-day end-to-end validation:
+The prototype notebook was used as a one-day end-to-end validation case. The following checks were used to confirm that the simulation behaved as expected:
 - **Input:** 4–5 Mar 2026 (one day of STK data)
 - **Expected eclipse fraction:** ~37% (34 min umbra per ~90 min orbit) ✓
 - **Expected structural blocking:** 0% (β ≈ 42° > 36° threshold) ✓ 
 - **Expected peak +H irradiance:** AM0 × cos(0°) = 1361 W/m² when Sun is directly above ✓
-- **Expected -R (nadir) ESH dominance over +R (zenith) for albedo:** ✓ (nadir face sees Earth; zenith does not)
+- **Expected albedo behavior:** the nadir-facing -R face receives a larger albedo contribution than the zenith-facing +R face ✓ (nadir face sees Earth; zenith does not)
 
 ### Diagnostic plots
 
 The simulation generates 9 diagnostic plots to support visual validation:
-1. **fig_azel_diagnostic.png** — Sun trajectory in Az/El space overlaid on exclusion zone polygons. Validates structural mask geometry.
-2. **fig_sun_eclipse.png** — Sun elevation angle and eclipse factor on the same timeline. Should show eclipse_factor = 0 when Sun is below the horizon (in eclipse).
-3. **fig_structural_blocking.png** — structural_factor vs. time. Should show blocking events correlated with Sun passing through known ISS shadow zones.
-4. **fig_direct_irradiance.png** — Direct irradiance per face. Should show sinusoidal variation with orbital period (~92 min), going to zero in eclipse.
-5. **fig_total_irradiance.png** — Total irradiance including albedo. Albedo contribution should be visible during eclipse (from Earth-reflected light on non-blocked faces when albedo is not zero).
-6. **fig_cumulative_esh_all.png** — Monotonically non-decreasing for all faces. Slope reflects average irradiance level.
-7. **fig_per_orbit_flux.png** — One-orbit irradiance profile. Useful for sanity-checking orbital geometry.
-8. **fig_exposure_mask.png** — Operational windows overlaid on irradiance. Gaps in ESH accumulation should coincide with exposure_open_factor = 0 periods.
-9. **fig_cumulative_esh_faces.png** — All faces together. The +H face typically accumulates the most ESH (Sun illuminates +H face most during high-beta orbits which dominate the 6-month average).
+1. **fig_azel_diagnostic.png** shows the Sun trajectory in azimuth/elevation space together with the exclusion-zone polygons. This is used to verify the structural blocking geometry.
+2. **fig_sun_eclipse.png** shows Sun angle and eclipse state over time. This is used to verify that eclipse intervals are applied at the correct times (should show eclipse_factor = 0 when Sun is below the horizon, in eclipse).
+3. **fig_structural_blocking.png** shows the structural blocking factor over time. This is used to check whether blocked intervals occur when the Sun passes through masked azimuth/elevation regions.
+4. **fig_direct_irradiance.png** shows direct irradiance for each face. This is used to verify expected orbital variation and the loss of direct irradiance during eclips (should show sinusoidal variation with orbital period (~92 min), going to zero in eclipse).
+5. **fig_total_irradiance.png** shows total irradiance, including albedo. This is used to verify that the reflected component is included correctly in the modeled irradiance.
+6. **fig_cumulative_esh_all.png** shows cumulative ESH over time for all faces. These curves should be monotonically non-decreasing.
+7. **fig_per_orbit_flux.png** shows irradiance over a single orbit. This is useful for checking orbital-scale behavior.
+8. **fig_exposure_mask.png** shows the operational exposure mask relative to irradiance. Breaks in accumulation should match periods where the exposure factor is zero.
+9. **fig_cumulative_esh_faces.png** compares cumulative ESH across all faces. Differences between faces help confirm that the model is capturing orientation-dependent exposure. The +H face typically accumulates the most ESH (Sun illuminates +H face most during high-beta orbits which dominate the 6-month average).
 
 ### Numerical sanity checks
 
 A 6-month simulation at ISS parameters should produce:
-- Total ESH for the best-illuminated face: approximately 700–1200 sun-hours (depending on beta angle history and exposure windows)
-- Eclipse fraction: ~38–45% of total time (varies with beta angle)
-- Albedo contribution: ~5–15% of total irradiance (albedo irradiance is maximum ~0.30 × 1361 × 0.88 ≈ 360 W/m² for the nadir face, but most faces are not nadir-facing)
+- **Total ESH for the best-illuminated face**: approximately 700–1200 sun-hours (depending on beta angle history and exposure windows)
+- **Eclipse fraction**: ~38–45% of total time (varies with beta angle)
+- **Albedo contribution**: ~5–15% of total irradiance (albedo irradiance is maximum ~0.30 × 1361 × 0.88 ≈ 360 W/m² for the nadir face, but most faces are not nadir-facing)
 
 ---
 
