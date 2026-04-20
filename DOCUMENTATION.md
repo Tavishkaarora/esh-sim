@@ -37,14 +37,14 @@
 
 The **MISSE Science Carrier (MSC)** is an external platform attached to the International Space Station (ISS). It exposes material samples and instruments to the space environment — including raw solar UV radiation, ionising radiation, thermal cycling, and atomic oxygen.
 
-One important value for this project is the **cumulative solar irradiance** received by each face of the MSC during a mission segment. This matters because solar exposure affecrs how materials and sensors behave over time. In particular, it is needed to:
+One important value for this project is the **cumulative solar irradiance** received by each face of the MSC during a mission segment. This matters because solar exposure affects how materials and sensors behave over time. In particular, it is needed to:
 
 1. **Estimate degradation** of materials such as polymers, optical surfaces, and detectors
 2. **Account for changes** in sensor response caused by UV exposure
 3. **Compare on-orbit exposure with ground-truth** experiments where known UV doses are applied 
 
 Calculating this exposure is not simple because the MSC does not receive sunlight in a constant or uniform way throughout the orbit. Several factors change the amount of irradiance reaching the platform:
-- The ISS orbit changes realtive to the Sun over time, which changes the **beta angle** (angle between the Sun and the orbital plane) 
+- The ISS orbit changes relative to the Sun over time, which changes the **beta angle** (angle between the Sun and the orbital plane)
 - The ISS body and solar arrays periodically **shadow the MSC** (structural blocking)
 - The MSC may have defined **operational windows** (periods when it is actively acquiring data vs. dormant)
 - **Earth albedo** — sunlight reflected off clouds and surface — contributes a non-trivial second source of irradiance
@@ -65,10 +65,10 @@ where AM0 is the solar constant and the result is converted from seconds to hour
 
 In simple terms, **1 ESH** means the sample received the same total solar energy as it would receive from **one hour of full, unobstructed sunlight at 1 AU**. Using ESH makes it easier to compare on-orbit exposure with controlled laboratory exposure tests. 
 
-ESH is calculated **for each face** of the MSC because each face sees a sifferent solar environment. This happens for several reasons:
+ESH is calculated **for each face** of the MSC because each face sees a different solar environment. This happens for several reasons:
 - Each face has a different orientation relative to the Sun and Earth
 - Different faces receive dramatically different cumulative doses depending on beta angle history
-- The sensor response is face-specific, so each detetctor panel must be evaluated seperately 
+- The sensor response is face-specific, so each detector panel must be evaluated separately
 
 The six MSC faces are defined in the **LVLH (Local Vertical Local Horizontal)** reference frame, which is described in the next section.
 
@@ -97,7 +97,7 @@ The three LVLH unit vectors are defined as follows:
 | Along-track | T̂ | Unit vector in the direction of motion within the orbital plane |
 | Orbit normal | Ĥ | Unit vector normal to the orbital plane |
 
-These vectors are contructed from the ISS position and velocity from STK:
+These vectors are constructed from the ISS position and velocity from STK:
 ```python
 r = np.array([x, y, z])           # ISS position in J2000
 v = np.array([vx, vy, vz])        # ISS velocity in J2000
@@ -108,7 +108,7 @@ H_hat = np.cross(r, v)
 H_hat = H_hat / np.linalg.norm(H_hat)
 T_hat = np.cross(H_hat, R_hat)    # then along-track
 ```
-This creates a right-handed LVLH coordinate system that is used to describe face orientations and Sun direction throguhout the simulation.
+This creates a right-handed LVLH coordinate system that is used to describe face orientations and Sun direction throughout the simulation.
 
 ### Sun Direction in LVLH
 
@@ -169,22 +169,21 @@ I_direct = AM0 × max(0, sun_unit · n̂)
 
 The dot product gives the cosine of the angle between the Sun direction and the face normal. If that value is negative, the face is pointing away from the Sun, so the direct irradiance is set to zero. 
 
-For each of the 6 LVLH-aligned faces, this becomes:
+For each of the 6 configured face labels, this becomes:
 ```python
-# For face "+H" (normal = [0, 0, 1]):
-cos_angle = s_H          # dot product with [0, 0, 1]
+# For face "+H" with a representative canted LVLH normal:
+n = FACE_NORMALS["+H"]
+cos_angle = n[0] * s_R + n[1] * s_T + n[2] * s_H
 I_direct_H = AM0 * max(0, cos_angle)
-
-# For face "+R" (normal = [1, 0, 0]):
-cos_angle = s_R
-I_direct_R = AM0 * max(0, cos_angle)
 
 # other faces are handled the same way
 ```
 
+The current production configuration uses representative canted LVLH vectors rather than a strict axis-aligned box. The face labels remain stable output identifiers, but the actual numeric normals are assumptions that should be replaced when final MSC geometry is available.
+
 ### 4.3 Earth Albedo Irradiance
 
-In addition to direct sunlight, the ISS also receives sunlight reflected from the Earth and clouds. This reflected compononet is modeled as **albedo irradiance**. In this simulation, albedo irradiance depends on four terms:
+In addition to direct sunlight, the ISS also receives sunlight reflected from the Earth and clouds. This reflected component is modeled as **albedo irradiance**. In this simulation, albedo irradiance depends on four terms:
 
 1. **Earth surface reflectivity ρ** (albedo, dimensionless 0–1)
 2. **Earth view factor F_earth** — what fraction of the sky hemisphere "seen" by the face is occupied by Earth
@@ -224,7 +223,7 @@ cos_earth = max(0, dot(n̂, -R_hat))    # angle to Earth centre; -R_hat = nadir
 I_albedo = ρ_eff × AM0 × F_earth × day_factor × cos_earth
 ```
 
-Note that `cos_earth` for the **-R (nadir) face** is maximised (= 1.0) since it points directly at Earth. The **+R (zenith) face** receives zero albedo since its normal points away from Earth.
+In the current representative canted configuration, every face normal includes a nonzero Earth-facing component, so each face receives some modeled albedo contribution. Faces with a larger projection toward `-R_hat` receive more reflected irradiance. If a future verified panel normal points away from Earth, this same equation will naturally reduce its albedo term to zero.
 
 In the current model, albedo is **not affected by the structural blocking mask**. This is because albedo comes from the broad Earth disk rather than from a single direct Sun direction. The structural mask is only applied to direct solar irradiance.
 
@@ -479,27 +478,29 @@ The prototype notebook was used as a one-day end-to-end validation case. The fol
 - **Expected eclipse fraction:** ~37% (34 min umbra per ~90 min orbit) ✓
 - **Expected structural blocking:** 0% (β ≈ 42° > 36° threshold) ✓ 
 - **Expected peak +H irradiance:** AM0 × cos(0°) = 1361 W/m² when Sun is directly above ✓
-- **Expected albedo behavior:** the nadir-facing -R face receives a larger albedo contribution than the zenith-facing +R face ✓ (nadir face sees Earth; zenith does not)
+- **Expected albedo behavior:** faces with larger Earth-facing projection receive larger albedo contribution ✓ (the current canted normals give every face a nonzero reflected-light term)
 
 ### Diagnostic plots
 
 The simulation generates 9 diagnostic plots to support visual validation:
-1. **fig_azel_diagnostic.png** shows the Sun trajectory in azimuth/elevation space together with the exclusion-zone polygons. This is used to verify the structural blocking geometry.
-2. **fig_sun_eclipse.png** shows Sun angle and eclipse state over time. This is used to verify that eclipse intervals are applied at the correct times (should show eclipse_factor = 0 when Sun is below the horizon, in eclipse).
-3. **fig_structural_blocking.png** shows the structural blocking factor over time. This is used to check whether blocked intervals occur when the Sun passes through masked azimuth/elevation regions.
-4. **fig_direct_irradiance.png** shows direct irradiance for each face. This is used to verify expected orbital variation and the loss of direct irradiance during eclips (should show sinusoidal variation with orbital period (~92 min), going to zero in eclipse).
-5. **fig_total_irradiance.png** shows total irradiance, including albedo. This is used to verify that the reflected component is included correctly in the modeled irradiance.
-6. **fig_cumulative_esh_all.png** shows cumulative ESH over time for all faces. These curves should be monotonically non-decreasing.
-7. **fig_per_orbit_flux.png** shows irradiance over a single orbit. This is useful for checking orbital-scale behavior.
-8. **fig_exposure_mask.png** shows the operational exposure mask relative to irradiance. Breaks in accumulation should match periods where the exposure factor is zero.
-9. **fig_cumulative_esh_faces.png** compares cumulative ESH across all faces. Differences between faces help confirm that the model is capturing orientation-dependent exposure. The +H face typically accumulates the most ESH (Sun illuminates +H face most during high-beta orbits which dominate the 6-month average).
+1. **fig_azel_blocking_90min.png** shows a readable 90-minute Sun trajectory segment through the structural mask, including blocked, unblocked, and eclipse samples.
+2. **fig_azel_diagnostic.png** shows the six-month Sun trajectory in azimuth/elevation space together with the exclusion-zone polygons. This is used to verify the structural blocking geometry.
+3. **fig_sun_eclipse.png** shows Sun angle and eclipse state over time. This is used to verify that eclipse intervals are applied at the correct times.
+4. **fig_structural_blocking.png** shows the structural blocking factor over time. This is used to check whether blocked intervals occur when the Sun passes through masked azimuth/elevation regions.
+5. **fig_direct_irradiance.png** shows direct irradiance for the primary face. This is used to verify expected orbital variation and the loss of direct irradiance during eclipse.
+6. **fig_total_irradiance.png** shows total irradiance, including albedo. This is used to verify that the reflected component is included correctly in the modeled irradiance.
+7. **fig_esh_accumulation_validation.png** shows cumulative ESH over time for all faces plus an albedo-only reference curve. These curves should be monotonically non-decreasing.
+8. **fig_cumulative_esh_all.png** shows cumulative ESH over time for all faces in the standard app style.
+9. **fig_per_orbit_flux.png** shows irradiance over a single orbit. This is useful for checking orbital-scale behavior.
+10. **fig_exposure_mask.png** shows the operational exposure mask relative to irradiance. Breaks in accumulation should match periods where the exposure factor is zero.
+11. **fig_cumulative_esh_faces.png** compares cumulative ESH across all faces. Differences between faces help confirm that the model is capturing orientation-dependent exposure.
 
 ### Numerical sanity checks
 
 A 6-month simulation at ISS parameters should produce:
 - **Total ESH for the best-illuminated face**: approximately 700–1200 sun-hours (depending on beta angle history and exposure windows)
 - **Eclipse fraction**: ~38–45% of total time (varies with beta angle)
-- **Albedo contribution**: ~5–15% of total irradiance (albedo irradiance is maximum ~0.30 × 1361 × 0.88 ≈ 360 W/m² for the nadir face, but most faces are not nadir-facing)
+- **Albedo contribution**: ~5–15% of total irradiance depending on face orientation (maximum theoretical nadir-facing albedo is ~0.30 × 1361 × 0.88 ≈ 360 W/m², while the current canted faces receive scaled fractions based on Earth-facing projection)
 
 ---
 
@@ -510,7 +511,7 @@ This section records every deliberate simplification, its physical justification
 | Assumption | Justification | Expected ESH error |
 |---|---|---|
 | Fixed TSI (AM0 = 1361 W/m²) | ±0.5 W/m² uncertainty; seasonal variation ±3.5% for Earth eccentricity | <4% peak; ~0% annual mean |
-| Generic LVLH box face normals | Actual MSC panel orientations unknown pending geometry delivery | Could be significant (order of cos(cant_angle) correction) |
+| Representative canted LVLH face normals | Actual MSC panel orientations unknown pending geometry delivery | Could be significant (order of cos(cant_angle) correction) |
 | Constant penumbra factor = 0.5 | Penumbra events are ~12 s; negligible ESH contribution | <0.01% |
 | POWER daily albedo applied at 1-minute cadence | Albedo varies slowly (synoptic-scale clouds); sub-daily variation is secondary | <5% on individual orbits; <2% monthly |
 | First-order Earth view factor (sin²(α)) | Exact form for disc view factor; valid for spherical Earth | <1% |
@@ -525,7 +526,7 @@ This section records every deliberate simplification, its physical justification
 
 ### Open: Actual MSC face normals and cant angles
 
-The current simulation uses idealised LVLH-aligned face normals (+R, -R, +T, -T, +H, -H). Real MSC panels may have:
+The current simulation uses representative canted LVLH face normals (+R, -R, +T, -T, +H, -H) so each configured face has a nonzero Earth-facing projection for albedo interpretation. Real MSC panels may have:
 - Cant angles (off-axis tilts for solar angle optimisation)
 - Non-orthogonal arrangements
 - A boresight that does not align with any pure LVLH axis

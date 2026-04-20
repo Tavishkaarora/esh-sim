@@ -35,7 +35,8 @@ This repository contains a production-ready pipeline for computing the cumulativ
 
 ```
 esh-estimate-simulation-aegis/
-├── .gitignore                          # Excludes large STK CSVs, outputs, .venv
+├── .gitignore                          # Excludes local caches, .venv, and regenerated CSV outputs
+├── requirements.txt                     # Python dependencies
 └── simulation/
     └── msc-esh-6-month-sim/            # Primary simulation package
         ├── data/                        # STK CSV exports (inputs)
@@ -48,10 +49,12 @@ esh-estimate-simulation-aegis/
         │       └── power_<lat>_<lon>_<date>.json
         ├── outputs/                     # Generated plots and result CSVs
         │   ├── msc_esh_6month_irradiance.csv   ← main simulation output
+        │   ├── fig_azel_blocking_90min.png
         │   ├── fig_azel_diagnostic.png
         │   ├── fig_cumulative_esh_all.png
         │   ├── fig_cumulative_esh_faces.png
         │   ├── fig_direct_irradiance.png
+        │   ├── fig_esh_accumulation_validation.png
         │   ├── fig_exposure_mask.png
         │   ├── fig_structural_blocking.png
         │   ├── fig_sun_eclipse.png
@@ -60,8 +63,7 @@ esh-estimate-simulation-aegis/
         ├── esh_final_simulation.ipynb   # Production pipeline (6-month)
         ├── esh_prototype.ipynb          # 1-day prototype / validation run
         ├── power_albedo.py              # NASA POWER API module
-        ├── streamlit_app.py             # Interactive web UI
-        └── prototype_face_irradiance_1day.csv  # 1-day test output
+        └── streamlit_app.py             # Interactive web UI
 ```
 
 ---
@@ -81,7 +83,7 @@ For space-based instruments like the MSC sensors, ESH drives:
 - Thermal cycling fatigue (indirect)
 - Calibration correction factors in sensor response models
 
-The simulation produces a **continuous ESH time series** for each of the six faces of the MSC package (+R, -R, +T, -T, +H, -H in LVLH frame coordinates), which downstream models convert to sensor-specific degradation estimates.
+The simulation produces a **continuous ESH time series** for each of the six configured MSC face labels (+R, -R, +T, -T, +H, -H). The current production run uses representative canted LVLH face normals, which downstream models convert to sensor-specific degradation estimates.
 
 ---
 
@@ -129,13 +131,15 @@ STK Scenario (ISS orbit propagation)
    (sensor_channel_split.ipynb, etc.)
 ```
 
-**The LVLH Frame:** All geometry is computed in the Local Vertical Local Horizontal frame:
+**The LVLH Frame:** Orbital geometry is computed in the Local Vertical Local Horizontal frame:
 - **+R (Radial):** Points away from Earth centre (zenith)
 - **-R (Nadir):** Points toward Earth
 - **+T (Along-track):** Velocity direction
 - **-T (Anti-velocity):** Trailing face
 - **+H (Orbit Normal):** Perpendicular to orbital plane
 - **-H (Anti-normal):** Opposite orbit normal
+
+The face-normal dictionary is expressed in this LVLH basis. For the current report, the six face labels are retained as stable output identifiers, but their normals are representative canted vectors rather than a strict axis-aligned box. Each selected vector includes a nonzero -R component so that the albedo model produces a reflected-light contribution for every face.
 
 ---
 
@@ -204,15 +208,17 @@ Returns a results dictionary containing:
 
 **Download section:** Two CSV downloads — face-specific export and full simulation DataFrame.
 
-**Face normal vectors (LVLH, generic box model):**
+**Face normal vectors (LVLH, representative canted model):**
 ```python
-"+R": [ 1,  0,  0]   # Zenith
-"-R": [-1,  0,  0]   # Nadir
-"+T": [ 0,  1,  0]   # Along-track (velocity)
-"-T": [ 0, -1,  0]   # Anti-velocity
-"+H": [ 0,  0,  1]   # Orbit normal
-"-H": [ 0,  0, -1]   # Anti-orbit normal
+"+R": [-0.15,  0.00,  0.99]
+"-R": [-0.94,  0.25,  0.25]
+"+T": [-0.24,  0.95,  0.20]
+"-T": [-0.24, -0.95,  0.20]
+"+H": [-0.24,  0.20,  0.95]
+"-H": [-0.24,  0.20, -0.95]
 ```
+
+These raw vectors are normalized in code before use. They are illustrative assumptions for the present simulation, not verified MSC CAD geometry.
 
 ---
 
@@ -340,10 +346,12 @@ The simulation uses `matplotlib.path.Path.contains_points()` to test whether the
 | File | Description |
 |---|---|
 | `msc_esh_6month_irradiance.csv` | **Main output.** Full time series of masked irradiance + ESH per face (see schema in §11) |
+| `fig_azel_blocking_90min.png` | Readable 90-minute structural-mask example used in the final report |
 | `fig_azel_diagnostic.png` | Sun Az/El track overlaid on exclusion zone polygons |
 | `fig_cumulative_esh_all.png` | Cumulative ESH for all 6 faces over simulation period |
 | `fig_cumulative_esh_faces.png` | Per-face ESH breakdown (bar chart or multi-line) |
 | `fig_direct_irradiance.png` | Direct solar irradiance comparison across faces |
+| `fig_esh_accumulation_validation.png` | Final-report cumulative ESH validation figure with albedo-only reference curve |
 | `fig_exposure_mask.png` | Timeline showing operational exposure open/closed windows |
 | `fig_structural_blocking.png` | Timeline of structural blocking events |
 | `fig_sun_eclipse.png` | Sun elevation angle + eclipse factor together |
@@ -756,19 +764,23 @@ Export STK reports at any cadence you choose (e.g., 30 s, 2 min). The simulation
 Face normals are defined in `streamlit_app.py` in the `FACE_NORMALS` dictionary (and equivalently in the notebook). To add or update a face:
 
 ```python
-FACE_NORMALS = {
-    "+R": np.array([ 1,  0,  0]),
-    "-R": np.array([-1,  0,  0]),
-    "+T": np.array([ 0,  1,  0]),
-    "-T": np.array([ 0, -1,  0]),
-    "+H": np.array([ 0,  0,  1]),
-    "-H": np.array([ 0,  0, -1]),
+_FACE_NORMALS_RAW = {
+    "+R": np.array([-0.15,  0.00,  0.99]),
+    "-R": np.array([-0.94,  0.25,  0.25]),
+    "+T": np.array([-0.24,  0.95,  0.20]),
+    "-T": np.array([-0.24, -0.95,  0.20]),
+    "+H": np.array([-0.24,  0.20,  0.95]),
+    "-H": np.array([-0.24,  0.20, -0.95]),
     # Add a canted face:
-    "+R_canted": np.array([0.866, 0.5, 0.0]),  # 30° cant toward +T
+    "+T_more_canted": np.array([-0.40, 0.85, 0.35]),
+}
+FACE_NORMALS = {
+    face: normal / np.linalg.norm(normal)
+    for face, normal in _FACE_NORMALS_RAW.items()
 }
 ```
 
-> **Note:** Current face normals are a generic LVLH box model. Real MSC panel orientations (tilt, cant, sensor boresight alignment) should be substituted once verified against the STK sensor mount definition.
+> **Note:** Current face normals are representative canted LVLH vectors chosen for simulation interpretation and visualization. Real MSC panel orientations, tilt, cant, and sensor boresight alignment should be substituted once verified against the STK sensor mount definition.
 
 ---
 
@@ -776,7 +788,7 @@ FACE_NORMALS = {
 
 | Limitation | Status | Impact |
 |---|---|---|
-| Face normals are generic LVLH box | Known; not yet fixed | Irradiance per face is approximate; correct to within typical alignment uncertainties |
+| Face normals are representative canted LVLH assumptions | Known; pending final geometry | Irradiance per face is approximate until verified MSC panel orientations are substituted |
 | Sensor frame alignment unverified | To-do | Could result in Az/El offset vs. actual sensor boresight |
 | Penumbra factor = 0.5 (placeholder) | Accepted; <0.01% ESH impact | Negligible |
 | No ISS attitude variations | Known | Maneuvers (TEA mode, reboosts) not modeled |
@@ -793,7 +805,13 @@ FACE_NORMALS = {
 cd /Users/tavishka/esh-estimate-simulation-aegis
 python -m venv .venv
 source .venv/bin/activate
-pip install streamlit pandas numpy matplotlib scipy requests jupyter
+pip install streamlit pandas numpy matplotlib requests jupyter
+```
+
+Or install from the project dependency list:
+
+```bash
+pip install -r requirements.txt
 ```
 
 ### Every subsequent session
@@ -811,5 +829,4 @@ source .venv/bin/activate
 | `numpy` | Vectorised math, LVLH frame computation |
 | `matplotlib` | Plotting; `matplotlib.path.Path` for Az/El polygon containment |
 | `requests` | NASA POWER API calls |
-| `scipy` | (Optional) statistical utilities |
 | `jupyter` / `jupyterlab` | Notebook execution |

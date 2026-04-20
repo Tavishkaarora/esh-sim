@@ -29,21 +29,29 @@ AM0          = 1361.0        # W/m²  AM0 solar irradiance
 R_EARTH_KM   = 6378.137
 STK_TIME_FMT = "%d %b %Y %H:%M:%S.%f"
 VALID_FACES  = ["+R", "-R", "+T", "-T", "+H", "-H"]
+# Representative canted face normals in LVLH coordinates. The labels are kept
+# for output/UI continuity; these are not final verified MSC panel orientations.
+# Each vector includes a nonzero Earth-facing (-R) component so the current
+# albedo model can exercise reflected-light behavior on every face.
+_FACE_NORMALS_RAW = {
+    "+R": np.array([-0.15,  0.00,  0.99]),
+    "-R": np.array([-0.94,  0.25,  0.25]),
+    "+T": np.array([-0.24,  0.95,  0.20]),
+    "-T": np.array([-0.24, -0.95,  0.20]),
+    "+H": np.array([-0.24,  0.20,  0.95]),
+    "-H": np.array([-0.24,  0.20, -0.95]),
+}
 FACE_NORMALS = {
-    "+R": np.array([ 1., 0., 0.]),
-    "-R": np.array([-1., 0., 0.]),
-    "+T": np.array([ 0., 1., 0.]),
-    "-T": np.array([ 0.,-1., 0.]),
-    "+H": np.array([ 0., 0., 1.]),
-    "-H": np.array([ 0., 0.,-1.]),
+    face: normal / np.linalg.norm(normal)
+    for face, normal in _FACE_NORMALS_RAW.items()
 }
 FACE_DISPLAY = {
-    "+R": "+R Zenith",          # Radially outward, away from Earth
-    "-R": "−R Nadir",           # Toward Earth
-    "+T": "+T Ram",             # Along-track (velocity direction)
-    "-T": "−T Wake",            # Anti-velocity
-    "+H": "+H Orbit Normal",    # Perpendicular to orbit plane
-    "-H": "−H Anti-orbit Normal",
+    "+R": "+R canted face",
+    "-R": "-R Earth-facing canted face",
+    "+T": "+T canted face",
+    "-T": "-T canted face",
+    "+H": "+H canted face",
+    "-H": "-H canted face",
 }
 DEFAULT_DATA_DIR  = str(Path(__file__).parent / "data")
 DEFAULT_CACHE_DIR = str(Path(__file__).parent / "data" / "cache")
